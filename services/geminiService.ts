@@ -15,84 +15,83 @@ const getAiClient = () => {
 
 const handleApiError = (error: any, task: string): never => {
     console.error(`PRISMA Engine Error (${task}):`, error);
-    const msg = (error?.message || "").toLowerCase();
+    
+    let msg = "";
+    try {
+      if (typeof error.message === 'string') {
+        const parsed = JSON.parse(error.message);
+        msg = (parsed?.error?.message || error.message).toLowerCase();
+      } else {
+        msg = (error?.message || "").toLowerCase();
+      }
+    } catch {
+      msg = (error?.message || "").toLowerCase();
+    }
     
     if (msg.includes("401") || msg.includes("403") || msg.includes("api key not valid") || msg.includes("invalid api key")) {
         window.dispatchEvent(new CustomEvent('PRISMA_API_KEY_INVALID'));
-        throw new Error("API Key not valid or project permissions missing. Please update your key in the Manager.");
+        throw new Error("API Key not valid. Please check your Engine Settings.");
     }
 
-    if (msg.includes("429") || msg.includes("quota") || msg.includes("limit")) {
-        throw new Error("Quota Exceeded: Your API key has run out of credits or reached its rate limit. Check ai.google.dev.");
+    if (msg.includes("429") || msg.includes("quota") || msg.includes("limit") || msg.includes("resource_exhausted")) {
+        throw new Error("QUOTA EXHAUSTED: Please wait 60 seconds or switch to a paid Gemini API key.");
     }
 
-    throw new Error(`Engine Failure [${task}]: ${error.message || 'Unknown failure'}`);
+    throw new Error(`Engine Failure [${task}]: ${msg || 'Unknown failure'}`);
 };
 
 /**
- * ADVANCED JSON REPAIR ENGINE
- * Specifically targets "Expected , or ]" errors caused by unescaped quotes or truncation.
+ * ULTRA-AGGRESSIVE JSON REPAIR ENGINE
  */
 const cleanJsonString = (text: string | undefined): string => {
   if (!text) return "{}";
   let cleaned = text.trim();
   
-  // 1. Remove Markdown Wrapper
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-  }
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
 
-  // 2. Locate the outermost JSON object
   const start = cleaned.indexOf('{');
   if (start === -1) return "{}";
-  
-  // 3. Handle Truncation: Find the last valid structural closure if possible
+  cleaned = cleaned.substring(start);
+
   let braceCount = 0;
   let bracketCount = 0;
   let inString = false;
-  let lastValidBreak = -1;
+  let escaped = false;
+  let lastValidIndex = -1;
 
-  for (let i = start; i < cleaned.length; i++) {
+  for (let i = 0; i < cleaned.length; i++) {
     const char = cleaned[i];
-    const prev = i > 0 ? cleaned[i-1] : '';
-
-    if (char === '"' && prev !== '\\') {
-      inString = !inString;
-    }
-
+    if (char === '"' && !escaped) inString = !inString;
     if (!inString) {
       if (char === '{') braceCount++;
-      if (char === '}') braceCount--;
-      if (char === '[') bracketCount++;
-      if (char === ']') bracketCount--;
+      else if (char === '}') braceCount--;
+      else if (char === '[') bracketCount++;
+      else if (char === ']') bracketCount--;
 
-      // Capture the point where we have a complete set of structures
-      if (braceCount === 0 && bracketCount === 0) {
-        lastValidBreak = i;
+      if (braceCount >= 0 && bracketCount >= 0) {
+        if (char === '}' || char === ']' || char === ',') lastValidIndex = i;
       }
     }
+    escaped = (char === '\\' && !escaped);
+    if (braceCount < 0 || bracketCount < 0) break;
   }
 
-  // Truncate to the last valid closure if we ended mid-stream
-  if (lastValidBreak !== -1) {
-    cleaned = cleaned.substring(start, lastValidBreak + 1);
-  } else {
-    // If no clean break, at least find the last brace and try to close it
-    const lastBrace = cleaned.lastIndexOf('}');
-    if (lastBrace > start) {
-      cleaned = cleaned.substring(start, lastBrace + 1);
-    } else {
-      cleaned = cleaned.substring(start);
+  if (braceCount > 0 || bracketCount > 0 || inString) {
+    if (lastValidIndex !== -1) {
+      cleaned = cleaned.substring(0, lastValidIndex + 1);
+      cleaned = cleaned.trim().replace(/,$/, '');
+      let subBrace = 0;
+      let subBracket = 0;
+      for (const c of cleaned) {
+        if (c === '{') subBrace++; if (c === '}') subBrace--;
+        if (c === '[') subBracket++; if (c === ']') subBracket--;
+      }
+      while (subBracket > 0) { cleaned += ']'; subBracket--; }
+      while (subBrace > 0) { cleaned += '}'; subBrace--; }
     }
   }
 
-  // 4. Clean structural literal newlines (invalid in JSON strings)
-  cleaned = cleaned.replace(/\n/g, ' ').replace(/\r/g, ' ');
-
-  // 5. Fix common LLM trailing comma errors
-  cleaned = cleaned.replace(/,\s*([\]}])/g, '$1');
-  
-  return cleaned;
+  return cleaned.replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/,\s*([\]}])/g, '$1');
 };
 
 const getRequiredKeyframeCount = (duration: string, density: string): number => {
@@ -109,83 +108,83 @@ const getRequiredKeyframeCount = (duration: string, density: string): number => 
 
 export const VISUAL_STYLE_PRESETS: Record<string, { image_style: string, video_style: string, recommended_vst: string }> = {
     "Stickman — 2D Classic": {
-        image_style: "2D classic stickman animation, clean vector linework, simple flat shapes, high readability, minimal shading, crisp edges",
-        video_style: "2D classic stickman motion, smooth tweened animation, stable linework, minimal shading, clean transitions",
+        image_style: "2D classic stickman animation, clean vector linework, flat shapes",
+        video_style: "2D classic stickman motion, smooth tweened animation, stable linework",
         recommended_vst: "VST_01 Clean Digital Cinema"
     },
     "Stickman — Blueprint": {
-        image_style: "blueprint schematic style, cyan grid background, white technical line drawings, precise geometry, labeled callouts",
-        video_style: "blueprint line-reveal animation, technical callout pop-ins, subtle parallax grid drift, clean schematic clarity",
+        image_style: "blueprint schematic style, cyan grid, white technical line drawings",
+        video_style: "blueprint line-reveal animation, technical callout pop-ins",
         recommended_vst: "VST_14 Matte Minimalist"
     },
     "Stickman — Chalkboard": {
-        image_style: "chalkboard sketch style, rough chalk strokes, dusty smudges, hand-drawn diagrams, classroom vibe",
-        video_style: "chalk-writing reveal animation, smudge transitions, chalk dust particles, hand-drawn timing",
+        image_style: "chalkboard sketch style, rough chalk strokes, dusty smudges",
+        video_style: "chalk-writing reveal animation, smudge transitions, chalk dust",
         recommended_vst: "VST_05 Overcast Documentary"
     },
     "Stickman — 3D Render": {
-        image_style: "simple 3D stick-figure render, smooth plastic material, soft studio lighting, clean shadows, minimal environment",
-        video_style: "simple 3D character animation, smooth keyframed motion, subtle camera drift, clean lighting continuity",
+        image_style: "simple 3D stick-figure render, smooth plastic, soft studio light",
+        video_style: "simple 3D character animation, smooth keyframed motion",
         recommended_vst: "VST_09 High-Key Commercial"
     },
     "Clay Animation": {
-        image_style: "clay animation style, handcrafted clay textures, visible fingerprints, warm cozy palette, practical set lighting",
-        video_style: "claymation motion, subtle stop-motion jitter, tactile deformations, warm practical light flicker realism",
+        image_style: "clay animation style, handcrafted clay textures, fingerprints",
+        video_style: "claymation motion, stop-motion jitter, tactile deformations",
         recommended_vst: "VST_02 Warm Indie Drama"
     },
     "Studio Ghibli": {
-        image_style: "Studio Ghibli aesthetic, hand-painted anime background, watercolor shading, warm atmospheric perspective, soft edges, nostalgic storybook feel",
-        video_style: "painterly animation feel, gentle parallax pans, soft light transitions, calm cinematic pacing",
+        image_style: "Studio Ghibli aesthetic, hand-painted watercolor anime, soft edges",
+        video_style: "painterly animation feel, gentle parallax pans, soft light transitions",
         recommended_vst: "VST_08 Soft Pastel Dream"
     },
     "Retro Anime": {
-        image_style: "retro 90s anime cel style, clean ink lines, limited shading, subtle halation, nostalgic palette",
-        video_style: "retro cel animation feel, limited-frame cadence, classic anime holds, mild film grain texture",
+        image_style: "retro 90s anime cel style, ink lines, limited shading, halation",
+        video_style: "retro cel animation, limited-frame cadence, classic anime holds",
         recommended_vst: "VST_06 Retro 35mm Film"
     },
     "Pixar Style": {
-        image_style: "stylized 3D family animation look, expressive faces, soft global illumination, polished materials, warm highlights",
-        video_style: "stylized 3D animation, smooth character arcs, cinematic DOF, gentle camera glides",
+        image_style: "stylized 3D family animation look, expressive faces, global illumination",
+        video_style: "stylized 3D animation, smooth character arcs, cinematic DOF",
         recommended_vst: "VST_09 High-Key Commercial"
     },
     "Stop-motion Animation": {
-        image_style: "miniature practical set, handmade props, tactile textures, shallow depth of field, charming imperfections",
-        video_style: "stop-motion feel, slight frame jitter, miniature parallax, practical lighting flicker realism",
+        image_style: "miniature practical set, handmade props, tactile textures",
+        video_style: "stop-motion feel, frame jitter, miniature parallax",
         recommended_vst: "VST_07 Vintage 16mm Home-Movie"
     },
     "Cutout Animation": {
-        image_style: "2D cutout puppet look, layered paper shapes, crisp silhouettes, bold color blocks, limited shadow depth",
-        video_style: "cutout puppet motion, hinge-like limb movement, layered parallax pans, playful timing",
+        image_style: "2D cutout puppet look, layered paper shapes, crisp silhouettes",
+        video_style: "cutout puppet motion, hinge-like limb movement, layered parallax",
         recommended_vst: "VST_14 Matte Minimalist"
     },
     "3D CGI Animation": {
-        image_style: "high quality 3D CGI frame, detailed materials, cinematic lighting, shallow depth of field, clean render",
-        video_style: "3D CGI cinematic, smooth camera moves, realistic motion blur, controlled lighting continuity",
+        image_style: "high quality 3D CGI frame, detailed materials, cinematic lighting",
+        video_style: "3D CGI cinematic, smooth camera moves, realistic motion blur",
         recommended_vst: "VST_11 Anamorphic Cinematic"
     },
     "Cinematic 8K": {
-        image_style: "ultra-detailed cinematic realism, crisp textures, controlled highlights, shallow DOF, cinematic grade",
-        video_style: "cinematic realism, slow dolly or tracking, subtle handheld texture, realistic motion blur, cohesive grade",
+        image_style: "ultra-detailed cinematic realism, crisp textures, shallow DOF",
+        video_style: "cinematic realism, slow dolly tracking, realistic motion blur",
         recommended_vst: "VST_11 Anamorphic Cinematic"
     },
     "Documentary": {
-        image_style: "documentary realism, natural lighting, candid framing, grounded color, handheld authenticity",
-        video_style: "documentary camera language, subtle handheld shake, natural ambience, minimal stylization",
+        image_style: "documentary realism, natural lighting, candid framing",
+        video_style: "documentary camera language, handheld shake, natural ambience",
         recommended_vst: "VST_05 Overcast Documentary"
     },
     "Cyberpunk": {
-        image_style: "cyberpunk neon city, wet reflective streets, magenta/cyan practicals, haze, high contrast, futuristic grit",
-        video_style: "neon noir cinematic, slow tracking, volumetric haze motion, rain streaks, reflective highlights",
+        image_style: "cyberpunk neon city, wet reflective streets, magenta/cyan practicals",
+        video_style: "neon noir cinematic, slow tracking, volumetric haze motion",
         recommended_vst: "VST_12 Neon Night City"
     },
     "Film Noir": {
-        image_style: "film noir, classic monochrome, hard shadows, venetian blind patterns, cigarette haze, dramatic contrast",
-        video_style: "noir pacing, slow push-in, chiaroscuro lighting, smoke drift, sparse ambience",
+        image_style: "film noir, classic monochrome, hard shadows, dramatic contrast",
+        video_style: "noir pacing, slow push-in, chiaroscuro lighting, smoke drift",
         recommended_vst: "VST_13 Black & White Classic"
     },
     "Low-Key Thriller": {
-        image_style: "low-key thriller lighting, deep shadows, tight contrast, selective practical lights, tense atmosphere",
-        video_style: "suspense pacing, slow dolly in, subtle handheld tension, shadow movement, sparse ambience",
+        image_style: "low-key thriller lighting, deep shadows, tight contrast",
+        video_style: "suspense pacing, slow dolly in, handheld tension",
         recommended_vst: "VST_10 Low-Key Thriller"
     }
 };
@@ -198,107 +197,65 @@ export const generateMoviePackage = async (input: UserInput): Promise<Production
     const keyframeTotal = getRequiredKeyframeCount(input.videoDuration, input.sceneDensity);
     const styleData = VISUAL_STYLE_PRESETS[input.visualStyle] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
 
-    const prompt = `Create a cinematic production package for:
-    - Narrative: "${input.script}"
-    - Style Preset: "${input.visualStyle}"
+    const prompt = `Act as PRISMA STUDIO. Generate a cinematic storyboard package.
+    - Script/Narrative: "${input.script}"
+    - Visual Style: "${input.visualStyle}"
+    - Character DNA (Phase 1): "${input.characterDescription}"
     - Project Ratio: "${input.aspectRatio}"
-    - Keyframes: ${keyframeTotal}
+    - Asset Count: ${keyframeTotal} Keyframes
 
-    PHASE 2 RULES (STRICT):
-    1) SCENE IMAGE PROMPT (field: prompt):
-    - MODE A — CHARACTER: "[CST] inside [BST]. [GST]. Subject: ..., Action: ..., Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}"
-    - MODE B — ATMOSPHERE: "[BST]. [GST]. Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}"
+    STRICT MASTER FORMATS (PHASE 1 & 2):
 
-    2) VIDEO MOTION PROMPT (field: videoPrompt):
-    - Structure: SCENE → CAMERA → STYLE/LIGHTING → MOTION → AUDIO → Aspect ratio → Negative prompt
-    - Style/Lighting: ${styleData.video_style}, [VST]
-    - Format: 1-4 lines. ${VIDEO_NEGATIVE_SUFFIX}
+    1. SCENE IMAGE PROMPTS (MASTER FORMAT):
+       - MODE A (Character Scene): Start with "[CST] inside [BST]. [GST]." Subject: ..., Action: ..., Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
+       - MODE B (Atmosphere Only): Start with "[BST]. [GST]." Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
 
-    STRICT DATA COMPRESSION:
-    To prevent JSON truncation, keep all prompt descriptions extremely concise. Use 2-3 word fragments instead of full sentences.
+    2. VIDEO MOTION PROMPTS (MASTER FORMAT):
+       - Sequence: Scene: ... Camera: ... Style/Lighting: ${styleData.video_style}, [VST] ... Motion: (primary motion + secondary atmosphere motion + camera nuance). Dialogue: "..." Audio: Ambient..., SFX..., Music... Aspect ratio: ${input.aspectRatio}. ${VIDEO_NEGATIVE_SUFFIX}
+       - Motion Requirement: At least TWO layers (Primary: character/environment + Secondary: atmosphere).
+       - Audio Defaults: If user did not specify music and dialogue is present, use "Music: no music". If no dialogue, use "Music: subtle ambient only".
 
-    STRICT ESCAPING:
-    NEVER use literal double quotes inside a string. If needed, use \\" or use single quotes instead.
-    
-    OUTPUT CONTRACT:
-    - JSON ONLY.
-    - keyframe_plan_titles: ${keyframeTotal} strings.
-    - visualPrompts: ${keyframeTotal} objects.`;
+    OUTPUT STRUCTURE:
+    - visualPrompts[0]: MUST be of type 'character' and use MODE A. It is the Reference ID for Phase 1.
+    - visualPrompts[1 to N]: Storyboard scenes, mix of MODE A and B as narrative dictates.
 
-    const systemInstruction = `You are PRISMA STUDIO. Generate prompts in strict MASTER FORMAT. Use [CST], [BST], [GST], [VST] tokens. ALWAYS escape internal double quotes. Keep strings concise.`;
+    JSON SCHEMA:
+    {
+      "keyframe_plan_titles": ["..."],
+      "metadata": { "topic": "...", "mood": "...", "visualStyle": "...", "aspectRatio": "...", "duration": "..." },
+      "seo": { "bestTitle": "...", "altTitles": ["..."], "videoDescription": "...", "tags": "...", "hashtags": "...", "thumbnailPrompt": "...", "sunoPrompt": "..." },
+      "story": "...",
+      "visualPrompts": [
+        { 
+          "label": "...", 
+          "prompt": "...", 
+          "videoPrompt": "...", 
+          "type": "character" | "scene", 
+          "requiresCharacter": boolean, 
+          "moodGuide": "...", 
+          "visualDescription": "...", 
+          "cameraAngle": "...", 
+          "estimatedDuration": number, 
+          "sfx_cues": { "primary": "..." } 
+        }
+      ]
+    }`;
 
     try {
         const response = await ai.models.generateContent({
-            model: input.modelEngine,
+            model: 'gemini-3-flash-preview',
             contents: prompt,
             config: {
-                systemInstruction,
                 responseMimeType: "application/json",
                 maxOutputTokens: 8192,
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        keyframe_plan_titles: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        metadata: { 
-                          type: Type.OBJECT, 
-                          properties: { 
-                            topic: { type: Type.STRING }, 
-                            mood: { type: Type.STRING }, 
-                            visualStyle: { type: Type.STRING }, 
-                            aspectRatio: { type: Type.STRING }, 
-                            duration: { type: Type.STRING } 
-                          } 
-                        },
-                        seo: { 
-                          type: Type.OBJECT, 
-                          properties: { 
-                            bestTitle: { type: Type.STRING }, 
-                            altTitles: { type: Type.ARRAY, items: { type: Type.STRING } }, 
-                            videoDescription: { type: Type.STRING }, 
-                            tags: { type: Type.STRING }, 
-                            hashtags: { type: Type.STRING }, 
-                            thumbnailPrompt: { type: Type.STRING }, 
-                            sunoPrompt: { type: Type.STRING } 
-                          } 
-                        },
-                        story: { type: Type.STRING },
-                        visualPrompts: { 
-                            type: Type.ARRAY, 
-                            items: { 
-                                type: Type.OBJECT, 
-                                properties: { 
-                                    label: { type: Type.STRING }, 
-                                    prompt: { type: Type.STRING }, 
-                                    videoPrompt: { type: Type.STRING },
-                                    type: { type: Type.STRING }, 
-                                    requiresCharacter: { type: Type.BOOLEAN }, 
-                                    moodGuide: { type: Type.STRING }, 
-                                    visualDescription: { type: Type.STRING },
-                                    cameraAngle: { type: Type.STRING }, 
-                                    estimatedDuration: { type: Type.NUMBER },
-                                    sfx_cues: {
-                                        type: Type.OBJECT,
-                                        properties: { primary: { type: Type.STRING } }
-                                    }
-                                } 
-                            } 
-                        }
-                    },
-                    required: ["keyframe_plan_titles", "visualPrompts", "metadata", "seo", "story"]
-                }
+                temperature: 0.7,
             }
         });
 
         const rawJson = cleanJsonString(response.text);
-        let data;
-        try {
-            data = JSON.parse(rawJson);
-        } catch (e) {
-            console.error("Critical JSON failure. Attempting aggressive repair...", e);
-            // Fallback for extreme cases
-            data = JSON.parse(rawJson + '}'); 
-        }
-        
+        const data = JSON.parse(rawJson);
+        const validPrompts = (data.visualPrompts || []).filter((p: any) => p && p.prompt);
+
         return {
             metadata: {
                 topic: data.metadata?.topic || input.script.substring(0, 30),
@@ -309,8 +266,8 @@ export const generateMoviePackage = async (input: UserInput): Promise<Production
             },
             seo: data.seo || { bestTitle: "Untitled", altTitles: [], videoDescription: "", tags: "", hashtags: "", thumbnailPrompt: "", sunoPrompt: "" },
             story: data.story || input.script,
-            titles: data.keyframe_plan_titles || [],
-            visualPrompts: data.visualPrompts || [],
+            titles: data.keyframe_plan_titles || (validPrompts.map((p: any) => p.label)),
+            visualPrompts: validPrompts,
             audioMap: [],
             cst: '', bst: '', gst: '', vst: styleData.recommended_vst
         };
@@ -350,7 +307,7 @@ export const extractContinuityTokensFromImage = async (base64Data: string, mimeT
             contents: {
                 parts: [
                     { inlineData: { data: base64Data, mimeType } },
-                    { text: `Extract literal descriptors for [CST] (Character), [BST] (Background), [GST] (Style), and [VST] (Lens/Film Look). Return JSON ONLY.` }
+                    { text: `Extract literal descriptors for: [CST] (Character DNA), [BST] (Environment), [GST] (Color/Light), [VST] (Camera texture). JSON ONLY.` }
                 ]
             },
             config: {
@@ -362,7 +319,7 @@ export const extractContinuityTokensFromImage = async (base64Data: string, mimeT
                 }
             }
         });
-        return JSON.parse(cleanJsonString(response.text) || "{}");
+        return JSON.parse(cleanJsonString(response.text));
     } catch (err) {
         return handleApiError(err, "EXTRACT_TOKENS");
     }
@@ -373,37 +330,10 @@ export const refinePackagePrompts = async (pkg: ProductionPackage, tokens: { cst
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Replace [CST], [BST], [GST], [VST] tokens with these descriptions in BOTH "prompt" and "videoPrompt" fields of the following array.
-            
-            Continuity Data:
-            CST: ${tokens.cst}
-            BST: ${tokens.bst}
-            GST: ${tokens.gst}
-            VST: ${tokens.vst}
-            
-            Prompts: ${JSON.stringify(pkg.visualPrompts)}`,
-            config: { 
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            label: { type: Type.STRING }, 
-                            prompt: { type: Type.STRING }, 
-                            videoPrompt: { type: Type.STRING },
-                            type: { type: Type.STRING }, 
-                            requiresCharacter: { type: Type.BOOLEAN }, 
-                            moodGuide: { type: Type.STRING }, 
-                            visualDescription: { type: Type.STRING },
-                            cameraAngle: { type: Type.STRING }, 
-                            estimatedDuration: { type: Type.NUMBER }
-                        }
-                    }
-                }
-            }
+            contents: `Inject tokens: CST=${tokens.cst}, BST=${tokens.bst}, GST=${tokens.gst}, VST=${tokens.vst} into: ${JSON.stringify(pkg.visualPrompts)}`,
+            config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(cleanJsonString(response.text) || "[]");
+        return JSON.parse(cleanJsonString(response.text));
     } catch (err) {
         return handleApiError(err, "REFINE_PROMPTS");
     }
@@ -413,32 +343,14 @@ export const enhanceVisualPrompt = async (prompt: string, stylePreset: string, a
     const ai = getAiClient();
     const styleData = VISUAL_STYLE_PRESETS[stylePreset] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
     
-    const systemInstruction = `You are a prompt engineer for PRISMA STUDIO. 
-    You must output EXACTLY ONE prompt in the MASTER FORMAT provided. 
-    Do not include any other text, options, or explanations.`;
-    
-    const promptText = `Refine this prompt into the PRISMA MASTER FORMAT: "${prompt}".
-    
-    GLOBAL INPUTS:
-    - Style: ${styleData.image_style}
-    - Ratio: ${aspectRatio}
-    - VST: ${styleData.recommended_vst}
-    
-    RULES:
-    - If character-centric: Use MODE A.
-    - If environment-centric: Use MODE B.
-    
-    MASTER FORMAT — MODE A (CHARACTER):
-    "[CST] inside [BST]. [GST]. Subject: ... Action: ... Location: ... Atmosphere: ... Style/VST: ${styleData.image_style}, [VST] ... Composition: ... Camera: ... Lens/focus: ... Lighting: ... Mood/Intent: ... Format: --ar ${aspectRatio}. ${NEGATIVE_SUFFIX}"
-    
-    MASTER FORMAT — MODE B (ATMOSPHERE):
-    "[BST]. [GST]. Location: ... Atmosphere: ... Style/VST: ${styleData.image_style}, [VST] ... Composition: ... Camera: ... Lens/focus: ... Lighting: ... Mood/Intent: ... Format: --ar ${aspectRatio}. ${NEGATIVE_SUFFIX}"`;
+    const promptText = `Rewrite this into PRISMA MASTER IMAGE FORMAT: "${prompt}".
+    - Mode A (If Character Scene): "[CST] inside [BST]. [GST]. Subject: ..., Action: ..., Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${aspectRatio}. ${NEGATIVE_SUFFIX}"
+    - Mode B (If Atmosphere Only): "[BST]. [GST]. Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${aspectRatio}. ${NEGATIVE_SUFFIX}"`;
 
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: promptText,
-            config: { systemInstruction }
+            contents: promptText
         });
         return response.text?.trim() || prompt;
     } catch (err) {
@@ -450,27 +362,20 @@ export const enhanceVideoPrompt = async (videoPrompt: string, visualPrompt: stri
     const ai = getAiClient();
     const styleData = VISUAL_STYLE_PRESETS[stylePreset] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
     
-    const systemInstruction = `You are a video prompt architect for PRISMA STUDIO.
-    Output EXACTLY ONE prompt following the MASTER VIDEO FORMAT.
-    Strict text-only, NO token prefixes like [CST] or [I2V].`;
-
-    const promptText = `Enhance this video motion prompt: "${videoPrompt}" 
-    Visual context: "${visualPrompt}"
+    const promptText = `Rewrite this into PRISMA MASTER VIDEO MOTION FORMAT: "${videoPrompt}".
+    Context: "${visualPrompt}".
     
-    MASTER VIDEO MOTION PROMPT FORMAT (STRICT):
-    "Scene: ... Camera: ... Style/Lighting: ${styleData.video_style}, [VST] ... Motion: (primary motion + secondary atmosphere motion + camera nuance). Dialogue: "..." Audio: Ambient..., SFX..., Music...
-    Aspect ratio: ${aspectRatio}. ${VIDEO_NEGATIVE_SUFFIX}"
+    STRICT SEQUENCE:
+    "Scene: ... Camera: ... Style/Lighting: ${styleData.video_style}, [VST] ... Motion: (primary character/environment + secondary atmosphere + optional camera nuance). Dialogue: "..." Audio: Ambient..., SFX..., Music... Aspect ratio: ${aspectRatio}. ${VIDEO_NEGATIVE_SUFFIX}"
     
-    RULES:
-    - Structured fields: SCENE → CAMERA → STYLE/LIGHTING → MOTION → AUDIO → Aspect ratio → Negative prompt.
-    - Motion: At least TWO layers.
-    - Audio: If no dialogue, use "Dialogue: no dialogue. Audio: subtle ambient only."`;
+    AUDIO RULES:
+    - If Dialogue is present, Music: no music.
+    - If Dialogue is "no dialogue", Music: subtle ambient only.`;
 
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: promptText,
-            config: { systemInstruction }
+            contents: promptText
         });
         return response.text?.trim() || videoPrompt;
     } catch (err) {
@@ -483,12 +388,12 @@ export const generateSfxCues = async (mood: string, title: string): Promise<SfxC
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Generate SFX cues for: "${title}". Mood: ${mood}. JSON ONLY.`,
+            contents: `SFX Cues for: "${title}". Mood: ${mood}. JSON: {primary, secondary}.`,
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(cleanJsonString(response.text) || "{}");
+        return JSON.parse(cleanJsonString(response.text));
     } catch (err) {
-        return { primary: "Cinematic ambience", secondary: "Background noise" };
+        return { primary: "Cinematic ambience", secondary: "Layered textures" };
     }
 };
 
@@ -497,14 +402,14 @@ export const generateSpeech = async (text: string, voiceId: string, style: strin
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: `Style: ${style}, Language: ${language}. Text: ${text}` }] }],
+            contents: [{ parts: [{ text: `Lang: ${language}. Voice: ${voiceId}. Text: ${text}` }] }],
             config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } },
             },
         });
         const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (!base64Audio) throw new Error("No audio returned.");
+        if (!base64Audio) throw new Error("Synthesis failed.");
         const pcmData = decode(base64Audio);
         const wavHeader = createWavHeader(pcmData.length, 24000, 1, 16);
         return URL.createObjectURL(new Blob([wavHeader, pcmData], { type: 'audio/wav' }));
@@ -515,32 +420,15 @@ export const generateSpeech = async (text: string, voiceId: string, style: strin
 
 export const generateViralScript = async (config: ViralScriptConfig): Promise<ViralScriptOutput> => {
     const ai = getAiClient();
-    const targetWpm = 155;
-    const approxWords = Math.round((config.duration / 60) * targetWpm);
-    const systemInstruction = `You are PRISMA STUDIO — Phase 0 Voice Over engine. Generate script following strict word budgets: ~${approxWords} words for ${config.duration}s. JSON ONLY.`;
-    const prompt = `Topic: ${config.topic}. Story: ${config.narrative}. Emotion: ${config.emotionTarget}. CTA: ${config.ctaStyle}.`;
+    const systemInstruction = `You are PRISMA VO engine. Budget: ~${Math.round(config.duration * 2.5)} words. JSON ONLY.`;
+    const prompt = `Topic: ${config.topic}. Narrative: ${config.narrative}. Tone: ${config.emotionTarget}.`;
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
-            config: {
-                systemInstruction,
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        voiceover_text: { type: Type.STRING },
-                        performance_prompt: { type: Type.STRING },
-                        segment_map: { 
-                            type: Type.ARRAY, 
-                            items: { type: Type.STRING }
-                        }
-                    },
-                    required: ["voiceover_text", "performance_prompt", "segment_map"]
-                }
-            }
+            config: { systemInstruction, responseMimeType: "application/json" }
         });
-        return JSON.parse(cleanJsonString(response.text) || "{}");
+        return JSON.parse(cleanJsonString(response.text));
     } catch (err) {
         return handleApiError(err, "GENERATE_VIRAL_SCRIPT");
     }
