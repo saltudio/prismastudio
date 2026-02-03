@@ -1,0 +1,102 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PRISMA STUDIO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Lexend+Mega:wght@800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+      /**
+       * PRISMA RUNTIME ENGINE: API KEY MANAGEMENT
+       * Ensures that the Gemini SDK can access the user-provided key via process.env.API_KEY.
+       */
+      (function() {
+        // Initialize the process.env shim on the window object for Vite 'define' bridge
+        window.process = window.process || { env: {} };
+        
+        const savedKey = localStorage.getItem('GEMINI_API_KEY');
+        if (savedKey) {
+          window.process.env.API_KEY = savedKey;
+        }
+
+        // Flicker-free dark mode loader
+        try {
+          const theme = localStorage.getItem('theme');
+          if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (_) {}
+      })();
+
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              brutal: {
+                bg: '#FDFDFD',
+                blue: '#0055FF', 
+                yellow: '#FFFF00',
+                dark: '#000000',
+                white: '#FFFFFF',
+                gray: '#EAEAEA'
+              }
+            },
+            fontFamily: {
+              display: ['Lexend Mega', 'sans-serif'],
+              sans: ['Space Grotesk', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            boxShadow: {
+              'brutal': '5px 5px 0px 0px #000000',
+              'brutal-sm': '2px 2px 0px 0px #000000',
+              'brutal-lg': '8px 8px 0px 0px #000000',
+            },
+            keyframes: {
+              'fade-in-up': {
+                  '0%': { opacity: '0', transform: 'translateY(20px)' },
+                  '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              'fade-in': {
+                  '0%': { opacity: '0' },
+                  '100%': { opacity: '1' },
+              }
+            },
+            animation: {
+                'fade-in-up': 'fade-in-up 0.3s ease-out forwards',
+                'fade-in': 'fade-in 0.3s ease-out forwards',
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "jszip": "https://esm.sh/jszip@^3.10.1",
+    "file-saver": "https://esm.sh/file-saver@^2.0.5",
+    "lamejs": "https://esm.sh/lamejs@^1.2.1",
+    "firebase/": "https://esm.sh/firebase@^12.8.0/",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.3"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-brutal-bg dark:bg-brutal-dark text-brutal-dark dark:text-brutal-gray font-sans antialiased min-h-screen selection:bg-brutal-yellow selection:text-brutal-dark">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

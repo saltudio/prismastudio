@@ -1,0 +1,41 @@
+import { VoiceOption } from '../types';
+
+const baseVoices: Omit<VoiceOption, 'language'>[] = [
+    { id: 'Zephyr', name: 'Zephyr', description: 'Bright', gender: 'Male', age: 'Young' },
+    { id: 'Puck', name: 'Puck', description: 'Upbeat', gender: 'Male', age: 'Young' },
+    { id: 'Charon', name: 'Charon', description: 'Informative', gender: 'Male', age: 'Adult' },
+    { id: 'Kore', name: 'Kore', description: 'Firm', gender: 'Female', age: 'Adult' },
+    { id: 'Fenrir', name: 'Fenrir', description: 'Excitable', gender: 'Male', age: 'Young' },
+    { id: 'Leda', name: 'Leda', description: 'Youthful', gender: 'Female', age: 'Young' },
+    { id: 'Orus', name: 'Orus', description: 'Firm', gender: 'Male', age: 'Adult' },
+    { id: 'Aoede', name: 'Aoede', description: 'Breezy', gender: 'Female', age: 'Young' },
+    { id: 'Callirrhoe', name: 'Callirrhoe', description: 'Easy-going', gender: 'Female', age: 'Neutral' },
+    { id: 'Autonoe', name: 'Autonoe', description: 'Bright', gender: 'Female', age: 'Young' },
+    { id: 'Enceladus', name: 'Enceladus', description: 'Breathy', gender: 'Male', age: 'Neutral' },
+    { id: 'Iapetus', name: 'Iapetus', description: 'Clear', gender: 'Male', age: 'Adult' },
+    { id: 'Umbriel', name: 'Umbriel', description: 'Easy-going', gender: 'Male', age: 'Neutral' },
+    { id: 'Algieba', name: 'Algieba', description: 'Smooth', gender: 'Male', age: 'Adult' },
+    { id: 'Despina', name: 'Despina', description: 'Smooth', gender: 'Female', age: 'Adult' },
+    { id: 'Erinome', name: 'Erinome', description: 'Clear', gender: 'Female', age: 'Adult' },
+    { id: 'Algenib', name: 'Algenib', description: 'Gravelly', gender: 'Male', age: 'Adult' },
+    { id: 'Rasalgethi', name: 'Rasalgethi', description: 'Informative', gender: 'Male', age: 'Adult' },
+    { id: 'Laomedeia', name: 'Laomedeia', description: 'Upbeat', gender: 'Female', age: 'Young' },
+    { id: 'Achernar', name: 'Achernar', description: 'Soft', gender: 'Male', age: 'Neutral' },
+    { id: 'Alnilam', name: 'Alnilam', description: 'Firm', gender: 'Female', age: 'Adult' },
+    { id: 'Schedar', name: 'Schedar', description: 'Even', gender: 'Female', age: 'Neutral' },
+    { id: 'Gacrux', name: 'Gacrux', description: 'Mature', gender: 'Male', age: 'Adult' },
+    { id: 'Pulcherrima', name: 'Pulcherrima', description: 'Forward', gender: 'Female', age: 'Neutral' },
+    { id: 'Achird', name: 'Achird', description: 'Friendly', gender: 'Female', age: 'Young' },
+    { id: 'Zubenelgenubi', name: 'Zubenelgenubi', description: 'Casual', gender: 'Male', age: 'Neutral' },
+    { id: 'Vindemiatrix', name: 'Vindemiatrix', description: 'Gentle', gender: 'Female', age: 'Neutral' },
+    { id: 'Sadachbia', name: 'Sadachbia', description: 'Lively', gender: 'Female', age: 'Young' },
+    { id: 'Sadaltager', name: 'Sadaltager', description: 'Knowledgeable', gender: 'Male', age: 'Adult' },
+    { id: 'Sulafat', name: 'Sulafat', description: 'Warm', gender: 'Female', age: 'Adult' },
+];
+
+export const voices: VoiceOption[] = [
+  ...baseVoices.map(v => ({ ...v, language: 'EN' as const })),
+  ...baseVoices.map(v => ({ ...v, language: 'ID' as const })),
+  ...baseVoices.map(v => ({ ...v, language: 'JP' as const })),
+  ...baseVoices.map(v => ({ ...v, language: 'KR' as const })),
+];
