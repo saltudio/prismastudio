@@ -127,11 +127,11 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ data, onTokensUpdate, onP
           const refinedPrompts = await refinePackagePrompts(data, tokens);
           if (refinedPrompts) {
               onPromptsUpdate(refinedPrompts);
-              alert("CONTINUITY SUCCESS: All scene prompts (Image & Motion) updated with literal descriptors.");
+              alert("CONTINUITY SUCCESS: Locked.");
           }
       } catch (err: any) {
           console.error("Refinement failed:", err);
-          alert("Continuity locked. Prompts will use basic token replacement.");
+          alert("Continuity locked.");
       } finally {
           setIsRefining(false);
       }
@@ -350,7 +350,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ data, onTokensUpdate, onP
                         <div>
                             <h3 className="font-display font-black text-2xl text-brutal-dark dark:text-white uppercase tracking-tight">Phase 2: Scene Production</h3>
                             <p className="font-mono text-[10px] text-brutal-dark/60 dark:text-white/40 uppercase">
-                              {data.visualPrompts?.filter(p => p.type === 'scene').length || 0} Keyframes Generated One-Shot (All Scenes)
+                              {scenePrompts.length} Keyframes Generated One-Shot (All Scenes)
                             </p>
                         </div>
                     </div>
