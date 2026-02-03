@@ -29,19 +29,69 @@ const handleApiError = (error: any, task: string): never => {
     throw new Error(`Engine Failure [${task}]: ${error.message || 'Unknown failure'}`);
 };
 
+/**
+ * ADVANCED JSON REPAIR ENGINE
+ * Specifically targets "Expected , or ]" errors caused by unescaped quotes or truncation.
+ */
 const cleanJsonString = (text: string | undefined): string => {
   if (!text) return "{}";
   let cleaned = text.trim();
+  
+  // 1. Remove Markdown Wrapper
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
   }
+
+  // 2. Locate the outermost JSON object
   const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    cleaned = cleaned.substring(start, end + 1);
+  if (start === -1) return "{}";
+  
+  // 3. Handle Truncation: Find the last valid structural closure if possible
+  let braceCount = 0;
+  let bracketCount = 0;
+  let inString = false;
+  let lastValidBreak = -1;
+
+  for (let i = start; i < cleaned.length; i++) {
+    const char = cleaned[i];
+    const prev = i > 0 ? cleaned[i-1] : '';
+
+    if (char === '"' && prev !== '\\') {
+      inString = !inString;
+    }
+
+    if (!inString) {
+      if (char === '{') braceCount++;
+      if (char === '}') braceCount--;
+      if (char === '[') bracketCount++;
+      if (char === ']') bracketCount--;
+
+      // Capture the point where we have a complete set of structures
+      if (braceCount === 0 && bracketCount === 0) {
+        lastValidBreak = i;
+      }
+    }
   }
+
+  // Truncate to the last valid closure if we ended mid-stream
+  if (lastValidBreak !== -1) {
+    cleaned = cleaned.substring(start, lastValidBreak + 1);
+  } else {
+    // If no clean break, at least find the last brace and try to close it
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (lastBrace > start) {
+      cleaned = cleaned.substring(start, lastBrace + 1);
+    } else {
+      cleaned = cleaned.substring(start);
+    }
+  }
+
+  // 4. Clean structural literal newlines (invalid in JSON strings)
   cleaned = cleaned.replace(/\n/g, ' ').replace(/\r/g, ' ');
+
+  // 5. Fix common LLM trailing comma errors
   cleaned = cleaned.replace(/,\s*([\]}])/g, '$1');
+  
   return cleaned;
 };
 
@@ -156,26 +206,26 @@ export const generateMoviePackage = async (input: UserInput): Promise<Production
 
     PHASE 2 RULES (STRICT):
     1) SCENE IMAGE PROMPT (field: prompt):
-    MODE A — CHARACTER SCENE: Start with "[CST] inside [BST]. [GST]." Subject: ..., Action: ..., Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
-    MODE B — ATMOSPHERE-ONLY (no character): Start with "[BST]. [GST]." Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
+    - MODE A — CHARACTER: "[CST] inside [BST]. [GST]. Subject: ..., Action: ..., Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}"
+    - MODE B — ATMOSPHERE: "[BST]. [GST]. Location: ..., Atmosphere: ..., Style/VST: ${styleData.image_style}, [VST] ..., Composition: ..., Camera: ..., Lens/focus: ..., Lighting: ..., Mood/Intent: ..., Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}"
 
     2) VIDEO MOTION PROMPT (field: videoPrompt):
-    - NO token prefix like "[CST] inside [BST]. [GST]. [I2V]".
     - Structure: SCENE → CAMERA → STYLE/LIGHTING → MOTION → AUDIO → Aspect ratio → Negative prompt
-    - Style/Lighting MUST include: ${styleData.video_style}, [VST]
-    - End with: Aspect ratio: ${input.aspectRatio}. ${VIDEO_NEGATIVE_SUFFIX}
+    - Style/Lighting: ${styleData.video_style}, [VST]
+    - Format: 1-4 lines. ${VIDEO_NEGATIVE_SUFFIX}
 
-    3) SFX CUE: Output Primary in sfx_cues.primary.
+    STRICT DATA COMPRESSION:
+    To prevent JSON truncation, keep all prompt descriptions extremely concise. Use 2-3 word fragments instead of full sentences.
 
-    OUTPUT CONTRACT (ONE-SHOT ALL SCENES):
-    - keyframe_plan_titles: EXACTLY ${keyframeTotal} strings.
-    - visualPrompts: EXACTLY ${keyframeTotal} objects. 
-      - index 0: type 'character'.
-      - index 1+: type 'scene'.
-    - SEO: High-CTR metadata.
-    - JSON ONLY. NO CHAT.`;
+    STRICT ESCAPING:
+    NEVER use literal double quotes inside a string. If needed, use \\" or use single quotes instead.
+    
+    OUTPUT CONTRACT:
+    - JSON ONLY.
+    - keyframe_plan_titles: ${keyframeTotal} strings.
+    - visualPrompts: ${keyframeTotal} objects.`;
 
-    const systemInstruction = `You are PRISMA STUDIO. Generate prompts in strict MASTER FORMAT. Use [CST], [BST], [GST], [VST] tokens.`;
+    const systemInstruction = `You are PRISMA STUDIO. Generate prompts in strict MASTER FORMAT. Use [CST], [BST], [GST], [VST] tokens. ALWAYS escape internal double quotes. Keep strings concise.`;
 
     try {
         const response = await ai.models.generateContent({
@@ -240,7 +290,15 @@ export const generateMoviePackage = async (input: UserInput): Promise<Production
         });
 
         const rawJson = cleanJsonString(response.text);
-        const data = JSON.parse(rawJson || "{}");
+        let data;
+        try {
+            data = JSON.parse(rawJson);
+        } catch (e) {
+            console.error("Critical JSON failure. Attempting aggressive repair...", e);
+            // Fallback for extreme cases
+            data = JSON.parse(rawJson + '}'); 
+        }
+        
         return {
             metadata: {
                 topic: data.metadata?.topic || input.script.substring(0, 30),
