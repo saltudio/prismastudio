@@ -2,15 +2,25 @@ import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { ProductionPackage, UserInput, ViralScriptConfig, ViralScriptOutput, SfxCues, VisualPrompt } from "../types";
 
 /**
- * PRISMA STUDIO CORE ENGINE - PRODUCTION LOCK
+ * PRISMA STUDIO CORE ENGINE - PRODUCTION LOCK v3.1
+ * Single-Pass Production Contract & Strict Master Formats
  */
 
 const getAiClient = () => {
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
-        throw new Error("API Key not found. Please ensure the Engine is locked with a valid Gemini API Key.");
+        throw new Error("API Key not found. Ensure environment is configured with a valid Gemini API Key.");
     }
     return new GoogleGenAI({ apiKey });
+};
+
+/**
+ * Exponential backoff with jitter for Quota (429) errors
+ */
+const delayWithJitter = (attempt: number) => {
+    const baseDelay = Math.pow(2, attempt) * 2000;
+    const jitter = Math.random() * 1000;
+    return new Promise(res => setTimeout(res, baseDelay + jitter));
 };
 
 const handleApiError = (error: any, task: string): never => {
@@ -28,28 +38,34 @@ const handleApiError = (error: any, task: string): never => {
       msg = (error?.message || "").toLowerCase();
     }
     
-    if (msg.includes("401") || msg.includes("403") || msg.includes("api key not valid") || msg.includes("invalid api key")) {
-        window.dispatchEvent(new CustomEvent('PRISMA_API_KEY_INVALID'));
-        throw new Error("API Key not valid. Please check your Engine Settings.");
-    }
-
     if (msg.includes("429") || msg.includes("quota") || msg.includes("limit") || msg.includes("resource_exhausted")) {
         throw new Error("QUOTA EXHAUSTED: Your API key has reached its limit. Wait 60s or switch to a paid key.");
+    }
+
+    if (msg.includes("401") || msg.includes("403") || msg.includes("api key not valid") || msg.includes("invalid api key")) {
+        throw new Error("API Key not valid. Please check your configuration.");
     }
 
     throw new Error(`Engine Failure [${task}]: ${msg || 'Unknown failure'}`);
 };
 
 /**
- * ULTRA-AGGRESSIVE JSON REPAIR ENGINE
+ * ULTRA-ROBUST JSON EXTRACTION AND REPAIR ENGINE
  */
 const cleanJsonString = (text: string | undefined): string => {
   if (!text) return "{}";
   let cleaned = text.trim();
   
+  // Remove markdown code blocks
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  
+  // Find the start of the first JSON object or array
+  const startObj = cleaned.indexOf('{');
+  const startArr = cleaned.indexOf('[');
+  let start = -1;
+  if (startObj !== -1 && (startArr === -1 || startObj < startArr)) start = startObj;
+  else if (startArr !== -1) start = startArr;
 
-  const start = cleaned.indexOf('{');
   if (start === -1) return "{}";
   cleaned = cleaned.substring(start);
 
@@ -58,6 +74,7 @@ const cleanJsonString = (text: string | undefined): string => {
   let inString = false;
   let escaped = false;
   let lastSafePoint = -1;
+  let finished = false;
 
   for (let i = 0; i < cleaned.length; i++) {
     const char = cleaned[i];
@@ -69,17 +86,26 @@ const cleanJsonString = (text: string | undefined): string => {
       else if (char === '[') bracketCount++;
       else if (char === ']') bracketCount--;
 
+      // Track last safe point to cut in case of truncation
       if (braceCount >= 0 && bracketCount >= 0) {
         if (char === '}' || char === ']' || char === ',') {
           lastSafePoint = i;
         }
+      }
+
+      // If counts hit 0, we found the end of the root JSON structure
+      if (braceCount === 0 && bracketCount === 0 && (i > 0)) {
+        cleaned = cleaned.substring(0, i + 1);
+        finished = true;
+        break;
       }
     }
     escaped = (char === '\\' && !escaped);
     if (braceCount < 0 || bracketCount < 0) break;
   }
 
-  if (braceCount > 0 || bracketCount > 0 || inString) {
+  // Handle truncation if not finished normally
+  if (!finished && (braceCount > 0 || bracketCount > 0 || inString)) {
     if (lastSafePoint !== -1) {
       cleaned = cleaned.substring(0, lastSafePoint + 1);
       cleaned = cleaned.trim().replace(/,$/, '');
@@ -104,15 +130,17 @@ const cleanJsonString = (text: string | undefined): string => {
 };
 
 const getRequiredKeyframeCount = (duration: string, density: string): number => {
+    const dKey = duration.toLowerCase().replace(/\s+/g, '_');
+    const denKey = density.toLowerCase();
     const table: Record<string, Record<string, number>> = {
-        "30 Seconds": { "Concise": 4, "Standard": 5, "Detailed": 6 },
-        "1 Minute": { "Concise": 6, "Standard": 8, "Detailed": 10 },
-        "3 Minutes": { "Concise": 10, "Standard": 14, "Detailed": 18 },
-        "5 Minutes": { "Concise": 14, "Standard": 20, "Detailed": 26 },
-        "8 Minutes": { "Concise": 18, "Standard": 26, "Detailed": 34 },
-        "10 Minutes": { "Concise": 20, "Standard": 30, "Detailed": 40 }
+        "30_seconds": { concise: 4, standard: 5, detailed: 6 },
+        "1_minute": { concise: 6, standard: 8, detailed: 10 },
+        "3_minutes": { concise: 10, standard: 14, detailed: 18 },
+        "5_minutes": { concise: 14, standard: 20, detailed: 26 },
+        "8_minutes": { concise: 18, standard: 26, detailed: 34 },
+        "10_minutes": { concise: 20, standard: 30, detailed: 40 }
     };
-    return table[duration]?.[density] || 8;
+    return table[dKey]?.[denKey] || 8;
 };
 
 export const VISUAL_STYLE_PRESETS: Record<string, { image_style: string, video_style: string, recommended_vst: string }> = {
@@ -199,45 +227,64 @@ export const VISUAL_STYLE_PRESETS: Record<string, { image_style: string, video_s
 };
 
 const NEGATIVE_SUFFIX = "--no text, watermark, logo, signature, bad anatomy, deformed, blurry, low quality, ugly, distorted face, extra fingers, uneven borders, random text, circle around number";
-const VIDEO_NEGATIVE_SUFFIX = "Negative prompt: watermark, random text, logos, extra limbs, distorted face, low quality.";
 
-export const generateMoviePackage = async (input: UserInput): Promise<ProductionPackage> => {
+export const generateMoviePackage = async (input: UserInput, retryCount = 0): Promise<ProductionPackage> => {
     const ai = getAiClient();
     const keyframeTotal = getRequiredKeyframeCount(input.videoDuration, input.sceneDensity);
-    const styleData = VISUAL_STYLE_PRESETS[input.visualStyle] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
+    const stylePreset = VISUAL_STYLE_PRESETS[input.visualStyle] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
 
-    const prompt = `Act as PRISMA STUDIO. Generate a cinematic storyboard package.
-    Narrative: "${input.script}"
-    Style: "${input.visualStyle}"
-    Character DNA: "${input.characterDescription}"
-    Target: ${keyframeTotal} Keyframes
+    const systemPrompt = `You are PRISMA STUDIO. Generate a full production package with EXACTLY ${keyframeTotal} scenes.
 
-    STRICT CONSTRAINTS:
-    1. BREVITY: Keep prompt strings concise. No fluff.
-    2. JSON VALIDITY: No unescaped double quotes inside strings.
-    3. MASTER FORMATS:
-       - image prompt: "[CST] inside [BST]. [GST]. Subject: ..., Style: ${styleData.image_style}, [VST] ..., --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}"
-       - videoPrompt: "Scene: ... Camera: ... Style/Lighting: ${styleData.video_style}, [VST] ... Motion: (layers). Dialogue: "..." Audio: Ambient..., SFX..., Music... Aspect ratio: ${input.aspectRatio}. ${VIDEO_NEGATIVE_SUFFIX}"
-    
+    MASTER FORMAT — CHARACTER SCENE (STRICT MODE A)
+    - Starts with: "[CST] inside [BST]. [GST]."
+    - Fields: Subject: [details], Action: [details], Location: [details], Atmosphere: [details], Style/VST: (${stylePreset.image_style}), [VST] [details], Composition: [details], Camera: [details], Lens/focus: [details], Lighting: [details], Mood/Intent: [details], Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
+    - 1-2 lines max.
+
+    MASTER FORMAT — ATMOSPHERE-ONLY (STRICT MODE B)
+    - MUST NOT start with "[CST] inside [BST].".
+    - Starts with: "[BST]. [GST]."
+    - Fields: Location: [details], Atmosphere: [details], Style/VST: (${stylePreset.image_style}), [VST] [details], Composition: [details], Camera: [details], Lens/focus: [details], Lighting: [details], Mood/Intent: [details], Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
+    - 1-2 lines max.
+
+    SINGLE-PASS OUTPUT CONTRACT:
+    - ALWAYS compute keyframe_total: ${keyframeTotal}.
+    - ALWAYS output keyframe_plan_titles length = ${keyframeTotal}.
+    - ALWAYS output visualPrompts length = ${keyframeTotal}.
+    - EACH visualPrompts item MUST include BOTH: prompt (Mode A or B) AND videoPrompt (motion).
+
     JSON SCHEMA:
     {
-      "keyframe_plan_titles": ["..."],
-      "metadata": { "topic": "...", "mood": "...", "visualStyle": "...", "aspectRatio": "...", "duration": "..." },
-      "seo": { "bestTitle": "...", "altTitles": ["..."], "videoDescription": "...", "tags": "...", "hashtags": "...", "thumbnailPrompt": "...", "sunoPrompt": "..." },
+      "project_ratio_used": "${input.aspectRatio}",
+      "asset_density_used": "${input.sceneDensity}",
+      "estimated_duration_used": "${input.videoDuration}",
+      "art_director_style_used": "${input.visualStyle}",
+      "keyframe_total": ${keyframeTotal},
+      "metadata": { "topic": "...", "mood": "..." },
+      "seo": { "bestTitle": "...", "altTitles": [], "videoDescription": "...", "tags": "...", "hashtags": "...", "thumbnailPrompt": "...", "sunoPrompt": "..." },
       "story": "...",
+      "keyframe_plan_titles": ["Title 1", "Title 2", ...],
       "visualPrompts": [
-        { "label": "...", "prompt": "...", "videoPrompt": "...", "type": "character"|"scene", "requiresCharacter": boolean, "moodGuide": "...", "visualDescription": "...", "cameraAngle": "...", "estimatedDuration": number, "sfx_cues": { "primary": "..." } }
-      ]
+        { 
+          "label": "...", "type": "character" | "scene", "requiresCharacter": bool, 
+          "prompt": "MODE A or B Prompt String", 
+          "videoPrompt": "Scene->Camera->Motion String", 
+          "sfx_cues": { "primary": "...", "secondary": "..." } 
+        }
+      ],
+      "single_pass_state": { "single_pass": "true", "total_keyframes": ${keyframeTotal}, "max_keyframes_single_pass": 40 }
     }`;
+
+    const userPrompt = `Script Content: "${input.script.substring(0, 1500)}"`;
 
     try {
         const response = await ai.models.generateContent({
             model: input.modelEngine || 'gemini-3-flash-preview',
-            contents: prompt,
+            contents: userPrompt,
             config: {
+                systemInstruction: systemPrompt,
                 responseMimeType: "application/json",
                 maxOutputTokens: 8192,
-                temperature: 0.6,
+                temperature: 0.7,
             }
         });
 
@@ -246,16 +293,11 @@ export const generateMoviePackage = async (input: UserInput): Promise<Production
         try {
             data = JSON.parse(rawJson);
         } catch (e) {
-            console.warn("Retrying JSON Parse...");
-            try {
-                data = JSON.parse(rawJson + '}');
-            } catch (innerE) {
-                throw new Error("JSON_STRUCTURAL_FAILURE: Response was truncated or malformed. Reduce 'Asset Density'.");
-            }
+            if (retryCount < 1) return generateMoviePackage(input, retryCount + 1);
+            throw new Error("JSON_STRUCTURAL_FAILURE: Response was truncated or invalid. Please shorten script or reduce density.");
         }
         
-        const rawPrompts = Array.isArray(data.visualPrompts) ? data.visualPrompts : [];
-        const validPrompts = rawPrompts.filter((p: any) => p && (p.prompt || p.label));
+        const validPrompts = (Array.isArray(data.visualPrompts) ? data.visualPrompts : []).slice(0, keyframeTotal);
 
         return {
             metadata: {
@@ -267,17 +309,21 @@ export const generateMoviePackage = async (input: UserInput): Promise<Production
             },
             seo: data.seo || { bestTitle: "Untitled", altTitles: [], videoDescription: "", tags: "", hashtags: "", thumbnailPrompt: "", sunoPrompt: "" },
             story: data.story || input.script,
-            titles: data.keyframe_plan_titles || (validPrompts.map((p: any) => p.label)),
+            titles: data.keyframe_plan_titles || validPrompts.map((p: any) => p.label || "Scene"),
             visualPrompts: validPrompts,
             audioMap: [],
-            cst: '', bst: '', gst: '', vst: styleData.recommended_vst
+            cst: '', bst: '', gst: '', vst: stylePreset.recommended_vst
         };
-    } catch (err) {
+    } catch (err: any) {
+        if ((err.message.includes("429") || err.message.includes("QUOTA") || err.message.includes("RESOURCE_EXHAUSTED")) && retryCount < 5) {
+            await delayWithJitter(retryCount);
+            return generateMoviePackage(input, retryCount + 1);
+        }
         return handleApiError(err, "GENERATE_PACKAGE");
     }
 };
 
-export const generateImage = async (prompt: string, aspectRatio: string, model: string = 'gemini-2.5-flash-image', refImage?: string): Promise<string> => {
+export const generateImage = async (prompt: string, aspectRatio: string, model: string = 'gemini-2.5-flash-image', refImage?: string, retryCount = 0): Promise<string> => {
     const ai = getAiClient();
     const parts: any[] = [];
     if (refImage) {
@@ -294,8 +340,12 @@ export const generateImage = async (prompt: string, aspectRatio: string, model: 
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         }
-        throw new Error("No image data returned.");
-    } catch (err) {
+        throw new Error("No image data returned from Engine.");
+    } catch (err: any) {
+        if ((err.message.includes("429") || err.message.includes("QUOTA") || err.message.includes("RESOURCE_EXHAUSTED")) && retryCount < 3) {
+            await delayWithJitter(retryCount);
+            return generateImage(prompt, aspectRatio, model, refImage, retryCount + 1);
+        }
         return handleApiError(err, "GENERATE_IMAGE");
     }
 };
@@ -308,14 +358,19 @@ export const extractContinuityTokensFromImage = async (base64Data: string, mimeT
             contents: {
                 parts: [
                     { inlineData: { data: base64Data, mimeType } },
-                    { text: `Extract descriptors: [CST], [BST], [GST], [VST]. JSON ONLY.` }
+                    { text: `Analyze this reference image and extract continuity tokens for: [CST] (subject appearance), [BST] (setting/background), [GST] (lighting/texture), [VST] (film style). JSON ONLY.` }
                 ]
             },
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.OBJECT,
-                    properties: { cst: { type: Type.STRING }, bst: { type: Type.STRING }, gst: { type: Type.STRING }, vst: { type: Type.STRING } },
+                    properties: { 
+                      cst: { type: Type.STRING }, 
+                      bst: { type: Type.STRING }, 
+                      gst: { type: Type.STRING }, 
+                      vst: { type: Type.STRING } 
+                    },
                     required: ['cst', 'bst', 'gst', 'vst']
                 }
             }
@@ -331,10 +386,16 @@ export const refinePackagePrompts = async (pkg: ProductionPackage, tokens: { cst
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Inject tokens: CST=${tokens.cst}, BST=${tokens.bst}, GST=${tokens.gst}, VST=${tokens.vst} into: ${JSON.stringify(pkg.visualPrompts)}`,
-            config: { responseMimeType: "application/json" }
+            contents: `Inject these continuity tokens into the prompts of this production package: CST=${tokens.cst}, BST=${tokens.bst}, GST=${tokens.gst}, VST=${tokens.vst}. Maintain the MASTER FORMAT strictly. Scenelist: ${JSON.stringify(pkg.visualPrompts)}`,
+            config: {
+                systemInstruction: "You are a prompt refiner. Return a JSON object with a 'visualPrompts' array.",
+                responseMimeType: "application/json"
+            }
         });
-        return JSON.parse(cleanJsonString(response.text));
+        const raw = JSON.parse(cleanJsonString(response.text));
+        let results = Array.isArray(raw) ? raw : (raw.visualPrompts || []);
+        if (!Array.isArray(results) && typeof results === 'object') results = Object.values(results);
+        return results as VisualPrompt[];
     } catch (err) {
         return handleApiError(err, "REFINE_PROMPTS");
     }
@@ -343,35 +404,21 @@ export const refinePackagePrompts = async (pkg: ProductionPackage, tokens: { cst
 export const enhanceVisualPrompt = async (prompt: string, stylePreset: string, aspectRatio: string): Promise<string> => {
     const ai = getAiClient();
     const styleData = VISUAL_STYLE_PRESETS[stylePreset] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
-    
-    const promptText = `Rewrite to MASTER IMAGE FORMAT: "${prompt}". Style: ${styleData.image_style}, VST: ${styleData.recommended_vst}, --ar ${aspectRatio}.`;
-
+    const promptText = `Refine this image prompt to MASTER FORMAT (Mode A or B). Style: ${styleData.image_style}, --ar ${aspectRatio}. Include Negative Suffix. Prompt: "${prompt}"`;
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: promptText
-        });
+        const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: promptText });
         return response.text?.trim() || prompt;
-    } catch (err) {
-        return prompt;
-    }
+    } catch (err) { return prompt; }
 };
 
 export const enhanceVideoPrompt = async (videoPrompt: string, visualPrompt: string, stylePreset: string, aspectRatio: string): Promise<string> => {
     const ai = getAiClient();
     const styleData = VISUAL_STYLE_PRESETS[stylePreset] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
-    
-    const promptText = `Rewrite to MASTER VIDEO MOTION FORMAT: "${videoPrompt}". Context: "${visualPrompt}". Sequence: Scene->Camera->Style(${styleData.video_style})->Motion->Audio.`;
-
+    const promptText = `Refine this motion prompt to MASTER MOTION FORMAT. Sequence: Scene->Camera->Motion. Context: "${visualPrompt}". Style: ${styleData.video_style}. Video Prompt: "${videoPrompt}"`;
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: promptText
-        });
+        const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: promptText });
         return response.text?.trim() || videoPrompt;
-    } catch (err) {
-        return videoPrompt;
-    }
+    } catch (err) { return videoPrompt; }
 };
 
 export const generateSfxCues = async (mood: string, title: string): Promise<SfxCues> => {
@@ -379,12 +426,12 @@ export const generateSfxCues = async (mood: string, title: string): Promise<SfxC
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `SFX Cues for: "${title}". Mood: ${mood}. JSON: {primary, secondary}.`,
+            contents: `Suggest 2 high-quality SFX cues for: "${title}" (Mood: ${mood}). JSON: {primary, secondary}.`,
             config: { responseMimeType: "application/json" }
         });
         return JSON.parse(cleanJsonString(response.text));
     } catch (err) {
-        return { primary: "Cinematic ambience", secondary: "Atmospheric" };
+        return { primary: "Ambient soundscape", secondary: "Atmospheric" };
     }
 };
 
@@ -393,7 +440,7 @@ export const generateSpeech = async (text: string, voiceId: string, style: strin
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: `Lang: ${language}. Text: ${text}` }] }],
+            contents: [{ parts: [{ text: `Language: ${language}. Script: ${text}` }] }],
             config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } },
@@ -411,7 +458,7 @@ export const generateSpeech = async (text: string, voiceId: string, style: strin
 
 export const generateViralScript = async (config: ViralScriptConfig): Promise<ViralScriptOutput> => {
     const ai = getAiClient();
-    const prompt = `Topic: ${config.topic}. Narrative: ${config.narrative}. Tone: ${config.emotionTarget}. Budget: ${Math.round(config.duration * 2.5)} words.`;
+    const prompt = `Topic: ${config.topic}. Target Duration: ${config.duration}s. Emotion: ${config.emotionTarget}. Create a high-engagement viral script for ${config.platform}. JSON only.`;
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
