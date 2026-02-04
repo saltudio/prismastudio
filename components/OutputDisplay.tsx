@@ -145,12 +145,15 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ data, onTokensUpdate, onP
   const handleBatchRender = () => {
     setIsBatchRendering(true);
     setRenderTrigger(prev => prev + 1);
-    setTimeout(() => setIsBatchRendering(false), 5000); 
+    // Adjust total wait time for batch based on scene count
+    const totalScenes = data.visualPrompts.length;
+    const waitTime = totalScenes * 3000 + 5000;
+    setTimeout(() => setIsBatchRendering(false), waitTime); 
   };
 
   const visualPrompts = Array.isArray(data.visualPrompts) ? data.visualPrompts : [];
-  const characterPrompts = visualPrompts.filter(p => p.type === 'character');
-  const scenePrompts = visualPrompts.filter(p => p.type === 'scene');
+  const characterPrompts = visualPrompts.filter(p => p.type === 'character' || p.requiresCharacter === true);
+  const scenePrompts = visualPrompts; // Show all generated keyframes
 
   return (
     <div className="animate-fade-in space-y-8">
@@ -368,7 +371,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ data, onTokensUpdate, onP
                             className="bg-brutal-dark text-white px-6 py-3 font-display font-black uppercase tracking-widest shadow-brutal hover:bg-brutal-yellow hover:text-brutal-dark transition-all flex items-center gap-3 disabled:opacity-50"
                         >
                             {isBatchRendering ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlayCircle className="w-5 h-5" />}
-                            Render All Scenes
+                            {isBatchRendering ? "Rendering Staggered..." : "Render All Scenes"}
                         </button>
                     </div>
                   </div>
@@ -392,6 +395,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ data, onTokensUpdate, onP
                       }}
                       commonBaseImage={commonBaseImage}
                       triggerRender={renderTrigger}
+                      staggerDelay={idx * 3000} // Sufficient stagger for up to 40 scenes
                       defaultAspectRatio={data.metadata?.aspectRatio as any || '16:9'}
                       onImageGenerated={(url) => handleImageGenerated(`scene_${idx + 1}`, url)}
                       continuityTokens={{ cst: data.cst, bst: data.bst, gst: data.gst, vst: data.vst }}
