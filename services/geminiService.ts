@@ -323,6 +323,49 @@ export const generateMoviePackage = async (input: UserInput, retryCount = 0): Pr
     }
 };
 
+export const generateVoiceoverPack = async (config: ViralScriptConfig, narrative: string): Promise<string> => {
+    const ai = getAiClient();
+    const systemPrompt = `You are an Audio Director. Generate a full Voiceover Pack directorial prompt.
+    
+    STRICT STRUCTURE:
+    # AUDIO PROFILE: [Name or Role]
+    ## "[Short Archetype Title]"
+    
+    ## THE SCENE: [Location / Environment]
+    [Physical environment + vibe aligned to Emotion + Audience.]
+    
+    ### DIRECTOR'S NOTES
+    Style: [match Emotion + Audience + CTA style]
+    Pacing: [fast/medium/slow; short-form cadence]
+    Accent: [Language-appropriate; English=Neutral American; Indonesian=Neutral Indonesian]
+    Delivery: [clarity, articulation]
+    CTA: [ONLY if CTA Style != No CTA; 1 line max]
+    
+    ### SAMPLE CONTEXT
+    [Mention character POV + gender/age preference]
+    
+    #### TRANSCRIPT
+    [Hook -> Core -> CTA]
+    
+    RULES:
+    - Language=${config.language} -> Transcript must be in that language.
+    - Emotion=${config.emotionTarget}.
+    - Audience=${config.audience}.
+    - POV=${config.characterPov}.
+    - CTA Style=${config.ctaStyle} (Question CTA must end with ?).`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `Narrative: ${narrative.substring(0, 2000)}`,
+            config: { systemInstruction: systemPrompt }
+        });
+        return response.text?.trim() || "Failed to generate prompt.";
+    } catch (err) {
+        return handleApiError(err, "GENERATE_VO_PACK");
+    }
+};
+
 export const generateImage = async (prompt: string, aspectRatio: string, model: string = 'gemini-2.5-flash-image', refImage?: string, retryCount = 0): Promise<string> => {
     const ai = getAiClient();
     const parts: any[] = [];
@@ -438,9 +481,14 @@ export const generateSfxCues = async (mood: string, title: string): Promise<SfxC
 export const generateSpeech = async (text: string, voiceId: string, style: string, language: string): Promise<string> => {
     const ai = getAiClient();
     try {
+        // PATCH: If directorial prompt structure is detected, pass as-is
+        const finalContent = text.startsWith('# AUDIO PROFILE:') 
+            ? text 
+            : `Language: ${language}. Style: ${style}. Script: ${text}`;
+
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: `Language: ${language}. Script: ${text}` }] }],
+            contents: [{ parts: [{ text: finalContent }] }],
             config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } },
