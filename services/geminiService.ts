@@ -246,6 +246,10 @@ export const generateMoviePackage = async (input: UserInput, retryCount = 0): Pr
     - Fields: Location: [details], Atmosphere: [details], Style/VST: (${stylePreset.image_style}), [VST] [details], Composition: [details], Camera: [details], Lens/focus: [details], Lighting: [details], Mood/Intent: [details], Format: --ar ${input.aspectRatio}. ${NEGATIVE_SUFFIX}
     - 1-2 lines max.
 
+    VIDEO MOTION PROMPT — MANDATORY STRUCTURE:
+    For EACH visualPrompts item, generate a "videoPrompt" following this strict format:
+    Scene: [summary]. Camera: [shot type (close-up/medium/wide/aerial) + movement (dolly/track/pan/handheld/crane) + lens (shallow/wide/macro/deep)]. Style/Lighting: [style + lighting]. Motion: [subject + environment motion]. Audio: [Ambient noise + SFX + Music rule (default "No music")]. Dialogue: "[quoted line or 'No dialogue']". Negative: no text, no watermark, no logo, no subtitles, no UI, no glitches.
+
     SINGLE-PASS OUTPUT CONTRACT:
     - ALWAYS compute keyframe_total: ${keyframeTotal}.
     - ALWAYS output keyframe_plan_titles length = ${keyframeTotal}.
@@ -267,7 +271,7 @@ export const generateMoviePackage = async (input: UserInput, retryCount = 0): Pr
         { 
           "label": "...", "type": "character" | "scene", "requiresCharacter": bool, 
           "prompt": "MODE A or B Prompt String", 
-          "videoPrompt": "Scene->Camera->Motion String", 
+          "videoPrompt": "Strict Video Prompt String", 
           "sfx_cues": { "primary": "...", "secondary": "..." } 
         }
       ],
@@ -457,7 +461,16 @@ export const enhanceVisualPrompt = async (prompt: string, stylePreset: string, a
 export const enhanceVideoPrompt = async (videoPrompt: string, visualPrompt: string, stylePreset: string, aspectRatio: string): Promise<string> => {
     const ai = getAiClient();
     const styleData = VISUAL_STYLE_PRESETS[stylePreset] || VISUAL_STYLE_PRESETS["Studio Ghibli"];
-    const promptText = `Refine this motion prompt to MASTER MOTION FORMAT. Sequence: Scene->Camera->Motion. Context: "${visualPrompt}". Style: ${styleData.video_style}. Video Prompt: "${videoPrompt}"`;
+    const promptText = `Generate a TIMESTAMPED 3-shot motion plan based on the context: "${visualPrompt}". 
+    
+    STRICT OUTPUT FORMAT:
+    - Exactly 3 lines.
+    - No extra commentary, no headings, no bullets.
+    - Each line format: <TS> Scene: ... Camera: ... Style/Lighting: ... Motion: ... Audio: ... (No music / or specified).
+    - Use timestamps: 0:00-0:02, 0:02-0:04, 0:04-0:06.
+    
+    Style Context: ${styleData.video_style}. Original Motion: "${videoPrompt}"`;
+    
     try {
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: promptText });
         return response.text?.trim() || videoPrompt;
