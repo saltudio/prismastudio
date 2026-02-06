@@ -70,7 +70,7 @@ export interface VoiceOption {
   name: string;
   description: string;
   gender: 'Male' | 'Female';
-  age: 'Young' | 'Adult' | 'Neutral';
+  age: 'Teen' | 'Young Adult' | 'Adult' | 'Mature' | 'Young' | 'Neutral';
   language: 'EN' | 'ID' | 'JP' | 'KR';
 }
 
@@ -86,6 +86,7 @@ export interface ViralScriptConfig {
   ctaStyle: string;
   narrative: string;
   visualStyle: string;
+  characterPov?: string;
   characterContext?: string;
 }
 
